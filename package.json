@@ -1,0 +1,24 @@
+{
+  "name": "crud",
+  "version": "0.0.1",
+  "description": "CRUD",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "tsc:watch": "tsc --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kjessup/node-crud.git"
+  },
+  "author": "Kyle Jessup",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kjessup/node-crud/issues"
+  },
+  "homepage": "https://github.com/kjessup/node-crud#readme",
+  "devDependencies": {
+    "@types/node": "^20.6.0"
+  }
+}
