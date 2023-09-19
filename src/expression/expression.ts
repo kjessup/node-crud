@@ -173,7 +173,7 @@ export class StringExpression extends CRUDExpression {
     }
 }
 
-class BlobExpression extends CRUDExpression {
+export class BlobExpression extends CRUDExpression {
     constructor(public blob: Uint8Array) {
         super();
     }
@@ -185,7 +185,7 @@ class BlobExpression extends CRUDExpression {
     }
 }
 
-class SBlobExpression extends CRUDExpression {
+export class SBlobExpression extends CRUDExpression {
     constructor(public sblob: Int8Array) {
         super();
     }

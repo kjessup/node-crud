@@ -1,5 +1,5 @@
 
-import { CRUDBooleanExpression, CRUDExpression } from "./expression/expression";
+import { AndExpression, BlobExpression, BoolExpression, CRUDBooleanExpression, CRUDExpression, ColumnExpression, DateExpression, DecimalExpression, EqualityExpression, ExpressionProducer, GreaterThanEqualExpression, GreaterThanExpression, InEqualityExpression, InExpression, IntegerExpression, LazyExpression, LessThanEqualExpression, LessThanExpression, LikeExpression, NotExpression, NullExpression, OrExpression, SBlobExpression, StringExpression, UUIDExpression } from "./expression/expression";
 
 export class CRUDSQLGenError extends Error {}
 export class CRUDSQLExeError extends Error {}
@@ -60,9 +60,15 @@ export type SQLStatement = {
     bindings: ExpressionBinding[];
 }
 
+export type SQLColumnData = {
+    name: string;
+    alias?: string;
+}
+
 export type SQLTableData = {
     tableName: string;
     alias: string;
+    selectCols: SQLColumnData[];
     joinData?: SQLJoinData;
 }
 
@@ -93,11 +99,11 @@ export class SQLGenState {
     statement: SQLStatement = {sql:'', bindings:[]};
     updateObjects: Object[] = [];
 
-    private aliasCounter = 0;
+    aliasCounter = 0;
 
-    addTable(tableName: string, joinData: SQLJoinData | undefined = undefined) {
+    addTable(tableName: string, selectCols: SQLColumnData[] = [{name:'*'}], joinData: SQLJoinData | undefined = undefined) {
         this.tableData.push(
-            {tableName, alias: this.nextAlias(), joinData})
+            {tableName, selectCols, alias: this.nextAlias(), joinData})
     }
 
     private nextAlias(): string {
@@ -164,11 +170,9 @@ export class Table extends
         WhereableMixin(
         JoinableMixin(
         OrderableMixin(
-        UpdateableMixin(
-        DeleteableMixin(
         LimitableMixin(
         InsertableMixin(
-            CRUDObjectBase)))))))) {
+            CRUDObjectBase)))))) {
     constructor(databaseConnection: IDatabaseConnection, public tableName: string) {
         super(databaseConnection);
     }
@@ -179,7 +183,7 @@ export class Table extends
         const { delegate, accumulatedOrderings: orderings, currentLimit: limit } = state;
         state.accumulatedOrderings = [];
         const t0 = state.tableData[0];
-        const tx = state.tableData.splice(1);
+        const tx = Array(...state.tableData).splice(1);
         const aliasMap: any = state.tableData.reduce((obj, item) => {
             return { 
               ...obj, 
@@ -193,7 +197,9 @@ export class Table extends
             case SQLCommand.select:
             case SQLCommand.count: {
                 let sqlStr = 
-                    `SELECT ${state.tableData.map(t => `${t.alias}.*`).join(',')} FROM ${nameQ} AS ${aliasQ}`;
+                    `SELECT ${state.tableData.map(t => {
+                        return t.selectCols.map(c => `${t.alias}.${c.name}${c.alias ? ` AS ${c.alias}` : ''}`).join(',');
+                    }).join(',')} FROM ${nameQ} AS ${aliasQ}`;
                 sqlStr += tx.map(t => 
                     `\nJOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
                 if (state.whereExpr !== undefined) {
@@ -219,13 +225,14 @@ export class Table extends
                 break;
             }
             case SQLCommand.update: {
-                const kvp = handleSet(state.updateObjects ?? {});
+                const kvp = handleSet(state.updateObjects[0] ?? {});
 
                 let sqlStr = 
                     `UPDATE ${nameQ}\n` +
-                    `SET ${zip(kvp.keys, delegate.bindings.map(e => e[0])).map(o => `${o[0]} = ${o[1]}`)}\n`
+                    `SET ${zip(kvp.keys, kvp.values.map(o => any(o))).map(
+                        o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`
                 //if (state.whereExpr !== undefined) {
-                    sqlStr += 
+                sqlStr += 
                     `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
                 //}
                 state.statement.sql = sqlStr;
@@ -233,15 +240,12 @@ export class Table extends
                 break;
             }
             case SQLCommand.insert: {
-                const kvp = handleSet(state.updateObjects ?? {});
+                const kvp = handleSet(state.updateObjects[0] ?? {});
 
                 let sqlStr = 
                     `INSERT INTO ${nameQ}\n`+ 
-                    `(${kvp.keys.join(',')}) VALUES (${delegate.bindings.map(e => e[0])})\n`;
-                //if (state.whereExpr !== undefined) {
-                    sqlStr += 
-                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
-                //}
+                    `(${kvp.keys.join(',')}) VALUES (${kvp.values.map(o => any(o).sqlSnippet(state))})`;
+
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
@@ -249,6 +253,8 @@ export class Table extends
             default:
                 break;
         }
+        state.currentLimit = undefined;
+        state.aliasCounter = 0;
     }
 }
 
@@ -338,20 +344,20 @@ export class Limit extends
     constructor(from: CRUDObjectBase, public max: number, public skip: number) {
         super(from);
     }
-    setSQL(state: SQLGenState): void {
+    setState(state: SQLGenState): void {
         state.currentLimit = {max: this.max, skip: this.skip};
-        super.setSQL(state);
+        super.setState(state);
     }
 }
 
 export interface Joinable {
-    join(srcTable: string, srcCol: string, joinTable: string, joinCol: string): Join;
+    join(srcTable: string, srcCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[]): Join;
 }
 
 export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Joinable {
-        join(sourceTable: string, sourceCol: string, joinTable: string, joinCol: string): Join {
-            return new Join(this, sourceTable, sourceCol, joinTable, joinCol);
+        join(sourceTable: string, sourceCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[] = [{name:'*'}]): Join {
+            return new Join(this, sourceTable, sourceCol, joinTable, joinCol, selectCols);
         }
     };
 }
@@ -367,12 +373,13 @@ export class Join extends
         public sourceTable: string,
         public sourceColumn: string,
         public joinTable: string,
-        public joinColumn: string) {
+        public joinColumn: string, 
+        public selectCols: SQLColumnData[]) {
         super(from);
     }
     setState(state: SQLGenState): void {
         super.setState(state);
-        state.addTable(this.sourceTable, {
+        state.addTable(this.sourceTable, this.selectCols, {
             sourceColumn: this.sourceColumn,
             joinTable: this.joinTable,
             joinColumn: this.joinColumn});
@@ -391,7 +398,10 @@ export function WhereableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) 
     };
 }
 
-export class Where extends SelectableMixin(CRUDFromObjectBase) {
+export class Where extends 
+        UpdateableMixin(
+        DeleteableMixin(
+        SelectableMixin(CRUDFromObjectBase))) {
     constructor(from: CRUDObjectBase, public expr: CRUDBooleanExpression) {
         super(from);
     }
@@ -402,13 +412,15 @@ export class Where extends SelectableMixin(CRUDFromObjectBase) {
 }
 
 export interface Deleteable {
-    delete(): Delete;
+    delete(): Promise<Delete>;
 }
 
 export function DeleteableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Deleteable {
-        delete(): Delete {
-            return new Delete(this);
+        async delete(): Promise<Delete> {
+            const d = new Delete(this);
+            await d.run();
+            return d;
         }
     };
 }
@@ -416,20 +428,22 @@ export function DeleteableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
 export class Delete extends CRUDCommandBase {
     constructor(from: CRUDObjectBase) {
         super(from);
+    }
+    async run() {
         const delegate = this.databaseConnection.sqlGenDelegate;
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.delete;
         this.setState(state);
         this.setSQL(state);
         this.sqlGenState = state;
-        const stat = state.statement
+        const stat = this.sqlGenState!.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        exeDelegate.exe<{}>(state.delegate.bindings);
+        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
     }
 }
 
 export interface Updateable {
-    update<Shape extends Object>(set: Shape): Update<Shape>;
+    update<Shape extends Object>(set: Shape): Promise<Update<Shape>>;
     updateReturning<Shape extends Object, Returning extends Object>(set: Shape): UpdateReturning<Shape, Returning>;
 }
 
@@ -438,24 +452,28 @@ export function UpdateableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
         updateReturning<Shape extends Object, Returning extends Object>(set: Shape): UpdateReturning<Shape, Returning> {
             return new UpdateReturning(this, set);
         }
-        update<Shape extends Object>(set: Shape): Update<Shape> {
-            return new Update(this, set);
+        async update<Shape extends Object>(set: Shape): Promise<Update<Shape>> {
+            const u = new Update(this, set);
+            await u.run();
+            return u;
         }
     };
 }
 
 export interface Insertable {
-    insert<O extends Object>(): Insert;
-    insertReturning<O extends Object, Returning extends Object>(): InsertReturning<Returning>;
+    insert<O extends Object>(...objects: O[]): Promise<Insert>;
+    insertReturning<O extends Object, Returning extends Object>(...objects: O[]): InsertReturning<Returning>;
 }
 
 export function InsertableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Insertable {
         insertReturning<O extends Object, Returning extends Object>(...objects: O[]): InsertReturning<Returning> {
-            throw new InsertReturning(this, objects);
+            return new InsertReturning(this, objects);
         }
-        insert<O extends Object>(...objects: O[]): Insert {
-            return new Insert(this, objects);
+        async insert<O extends Object>(...objects: O[]): Promise<Insert> {
+            const i = new Insert(this, objects);
+            await i.run();
+            return i;
         }
     };
 }
@@ -463,6 +481,8 @@ export function InsertableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
 export class Select<Shape extends Object> extends CRUDCommandBase {
     constructor(from: CRUDObjectBase) {
         super(from);
+    }
+    async rows(): Promise<Shape[]> {
         let state = new SQLGenState(this.databaseConnection.sqlGenDelegate);
         state.command = SQLCommand.select;
         this.setState(state);
@@ -471,8 +491,6 @@ export class Select<Shape extends Object> extends CRUDCommandBase {
             throw new CRUDSQLGenError(`Orderings were not consumed: ${state.accumulatedOrderings}`)
         }
         this.sqlGenState = state;
-    }
-    async rows(): Promise<Shape[]> {
         const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
         return await gen.exe<Shape>(this.sqlGenState?.delegate.bindings ?? []);
     }
@@ -482,73 +500,211 @@ export class Select<Shape extends Object> extends CRUDCommandBase {
 export class Update<Shape extends Object> extends CRUDCommandBase {
     constructor(from: CRUDObjectBase, public set: Shape) {
         super(from);
+    }
+    async run() {
         const delegate = this.databaseConnection.sqlGenDelegate;
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.update;
-        state.updateObjects.push(set);
+        state.updateObjects.push(this.set);
         this.setState(state);
         this.setSQL(state);
         this.sqlGenState = state;
-        const stat = state.statement
+        const stat = this.sqlGenState!.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        exeDelegate.exe<{}>(state.delegate.bindings);
+        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
     }
 }
 
 export class UpdateReturning<Shape extends Object, Returning extends Object> extends CRUDCommandBase {
     constructor(from: CRUDObjectBase, public set: Shape) {
         super(from);
-        const delegate = this.databaseConnection.sqlGenDelegate;
-        let state = new SQLGenState(delegate);
-        state.command = SQLCommand.update;
-        state.updateObjects.push(set);
-        this.setState(state);
-        this.setSQL(state);
-        this.sqlGenState = state;
     }
     setSQL(state: SQLGenState): void {
         this.from.setSQL(state);
         state.statement.sql += `\nRETURNING *`;
     }
     async rows(): Promise<Returning[]> {
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.update;
+        state.updateObjects.push(this.set);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
         const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
         return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
+    }
+    async first(): Promise<Returning> {
+        const r = await this.rows();
+        return r[0];
     }
 }
 
 export class Insert extends CRUDCommandBase {
-    constructor(from: CRUDObjectBase, objects: Object[]) {
+    constructor(from: CRUDObjectBase, public objects: Object[]) {
         super(from);
+    }
+    async run() {
         const delegate = this.databaseConnection.sqlGenDelegate;
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.insert;
-        state.updateObjects.push(objects);
+        state.updateObjects.push(...this.objects);
         this.setState(state);
         this.setSQL(state);
         this.sqlGenState = state;
-        const stat = state.statement
+        const stat = this.sqlGenState!.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        exeDelegate.exe<{}>(state.delegate.bindings);
+        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
     }
 }
 
 export class InsertReturning<Returning extends Object> extends CRUDCommandBase {
-    constructor(from: CRUDObjectBase, objects: Object[]) {
+    constructor(from: CRUDObjectBase, public objects: Object[]) {
         super(from);
-        const delegate = this.databaseConnection.sqlGenDelegate;
-        let state = new SQLGenState(delegate);
-        state.command = SQLCommand.insert;
-        state.updateObjects.push(objects);
-        this.setState(state);
-        this.setSQL(state);
-        this.sqlGenState = state;
     }
     setSQL(state: SQLGenState): void {
         this.from.setSQL(state);
-        state.statement.sql += `\nRETURNING *`;
+        state.statement.sql += ` RETURNING *`;
     }
     async rows(): Promise<Returning[]> {
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.insert;
+        state.updateObjects.push(...this.objects);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
         const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
         return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
     }
+    async first(): Promise<Returning> {
+        const r = await this.rows();
+        return r[0];
+    }
 }
+
+// -------
+
+// Helper for ColumnExpression
+export function col(column: string): ColumnExpression {
+    return new ColumnExpression(column);
+}
+
+// Helper for CRUDBooleanExpression
+export function and(lhs: CRUDExpression, rhs: CRUDExpression): AndExpression {
+    return new AndExpression(lhs, rhs);
+}
+
+export function or(lhs: CRUDExpression, rhs: CRUDExpression): OrExpression {
+    return new OrExpression(lhs, rhs);
+}
+
+export function eq(lhs: CRUDExpression, rhs: CRUDExpression): EqualityExpression {
+    return new EqualityExpression(lhs, rhs);
+}
+
+export function eqCol(lhs: string, rhs: CRUDExpression): EqualityExpression {
+    return new EqualityExpression(col(lhs), rhs);
+}
+
+export function neq(lhs: CRUDExpression, rhs: CRUDExpression): InEqualityExpression {
+    return new InEqualityExpression(lhs, rhs);
+}
+
+export function not(rhs: CRUDExpression): NotExpression {
+    return new NotExpression(rhs);
+}
+
+export function lt(lhs: CRUDExpression, rhs: CRUDExpression): LessThanExpression {
+    return new LessThanExpression(lhs, rhs);
+}
+
+export function lte(lhs: CRUDExpression, rhs: CRUDExpression): LessThanEqualExpression {
+    return new LessThanEqualExpression(lhs, rhs);
+}
+
+export function gt(lhs: CRUDExpression, rhs: CRUDExpression): GreaterThanExpression {
+    return new GreaterThanExpression(lhs, rhs);
+}
+
+export function gte(lhs: CRUDExpression, rhs: CRUDExpression): GreaterThanEqualExpression {
+    return new GreaterThanEqualExpression(lhs, rhs);
+}
+
+export function inExp(lhs: CRUDExpression, rhs: CRUDExpression[]): InExpression {
+    return new InExpression(lhs, rhs);
+}
+
+export function like(lhs: CRUDExpression, wild1: boolean, string: string, wild2: boolean): LikeExpression {
+    return new LikeExpression(lhs, wild1, string, wild2);
+}
+
+export function lazy(expressionProducer: ExpressionProducer): LazyExpression {
+    return new LazyExpression(expressionProducer);
+}
+
+// Helper for CRUDExpression
+export function int(int: number): IntegerExpression {
+    return new IntegerExpression(int);
+}
+
+export function dec(decimal: number): DecimalExpression {
+    return new DecimalExpression(decimal);
+}
+
+export function str(str: string): StringExpression {
+    return new StringExpression(str);
+}
+
+export function blob(blob: Uint8Array): BlobExpression {
+    return new BlobExpression(blob);
+}
+
+export function sblob(sblob: Int8Array): SBlobExpression {
+    return new SBlobExpression(sblob);
+}
+
+export function bool(bool: boolean): BoolExpression {
+    return new BoolExpression(bool);
+}
+
+export function date(date: Date): DateExpression {
+    return new DateExpression(date);
+}
+
+export function uuid(uuid: string): UUIDExpression {
+    return new UUIDExpression(uuid);
+}
+
+export function nullExp(): NullExpression {
+    return new NullExpression();
+}
+
+export function any(a: any): CRUDExpression {
+    switch (typeof a) {
+        case 'number':
+            //javascript does not have an inbuilt method to check if the number is integer or float
+            //checking if it is a float or integer
+            return Number(a) === a && a % 1 !== 0 ? dec(a) : int(a);
+        case 'string':
+            return str(a);
+        case 'boolean':
+            return bool(a);
+        case 'object':
+            if(a instanceof Date) {
+                return date(a);
+            } else if(a instanceof Uint8Array) {
+                return blob(a);
+            } else if (a instanceof Int8Array) {
+                return sblob(a);
+            }
+            return str(JSON.stringify(a));
+        case 'undefined':
+        case 'function':
+            return nullExp();
+        default:
+            throw new Error(`Unknown type ${typeof a}`);
+    }
+}
+
+
