@@ -10,8 +10,9 @@ export type ObjectBinding = [string, any];
 export type Bindings = ObjectBinding[];
 
 export interface IDatabaseConnection {
-    sqlGenDelegate: SQLGenDelegate;
+    sqlGenDelegate(): SQLGenDelegate;
     sqlExeDelegate(forSQL: string): SQLExeDelegate;
+    close(): void;
 }
 
 export type GConstructor<T = {}> = new (...args: any[]) => T;
@@ -35,7 +36,7 @@ export class CRUDFromObjectBase extends CRUDObjectBase {
 }
 
 export class CRUDCommandBase extends CRUDFromObjectBase {
-    sqlGenState?: SQLGenState;
+    //sqlGenState?: SQLGenState;
     constructor(from: CRUDObjectBase) {
         super(from);
     }
@@ -151,6 +152,9 @@ export class Database {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		return await delegate.exe<Shape>(bindings);
     }
+    close() {
+        this.databaseConnection.close();
+    }
 }
 
 function handleSet(o: Object): { keys: string[], values: any[] } {
@@ -182,6 +186,9 @@ export class Table extends
     setSQL(state: SQLGenState): void {
         const { delegate, accumulatedOrderings: orderings, currentLimit: limit } = state;
         state.accumulatedOrderings = [];
+        state.currentLimit = undefined;
+        state.aliasCounter = 0;
+
         const t0 = state.tableData[0];
         const tx = Array(...state.tableData).splice(1);
         const aliasMap: any = state.tableData.reduce((obj, item) => {
@@ -201,7 +208,7 @@ export class Table extends
                         return t.selectCols.map(c => `${t.alias}.${c.name}${c.alias ? ` AS ${c.alias}` : ''}`).join(',');
                     }).join(',')} FROM ${nameQ} AS ${aliasQ}`;
                 sqlStr += tx.map(t => 
-                    `\nJOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                    `\nLEFT JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
                 if (state.whereExpr !== undefined) {
                     sqlStr += 
                     `\nWHERE ${state.whereExpr.sqlSnippet(state)}`;
@@ -253,8 +260,6 @@ export class Table extends
             default:
                 break;
         }
-        state.currentLimit = undefined;
-        state.aliasCounter = 0;
     }
 }
 
@@ -277,7 +282,7 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
             return undefined;
         }
         async count(): Promise<number> {
-            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate);
+            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
             state.command = SQLCommand.count;
             this.setState(state);
             this.setSQL(state);
@@ -345,8 +350,8 @@ export class Limit extends
         super(from);
     }
     setState(state: SQLGenState): void {
-        state.currentLimit = {max: this.max, skip: this.skip};
         super.setState(state);
+        state.currentLimit = {max: this.max, skip: this.skip};
     }
 }
 
@@ -430,15 +435,13 @@ export class Delete extends CRUDCommandBase {
         super(from);
     }
     async run() {
-        const delegate = this.databaseConnection.sqlGenDelegate;
-        let state = new SQLGenState(delegate);
+        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
         state.command = SQLCommand.delete;
         this.setState(state);
         this.setSQL(state);
-        this.sqlGenState = state;
-        const stat = this.sqlGenState!.statement
+        const stat = state.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
+        await exeDelegate.exe<{}>(state.delegate.bindings);
     }
 }
 
@@ -483,16 +486,15 @@ export class Select<Shape extends Object> extends CRUDCommandBase {
         super(from);
     }
     async rows(): Promise<Shape[]> {
-        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate);
+        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
         state.command = SQLCommand.select;
         this.setState(state);
         this.setSQL(state);
         if (state.accumulatedOrderings.length != 0) {
             throw new CRUDSQLGenError(`Orderings were not consumed: ${state.accumulatedOrderings}`)
         }
-        this.sqlGenState = state;
-        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
-        return await gen.exe<Shape>(this.sqlGenState?.delegate.bindings ?? []);
+        const gen = new SQLTopExeDelegate(state, this.databaseConnection);
+        return await gen.exe<Shape>(state.delegate.bindings ?? []);
     }
 }
 
@@ -502,16 +504,14 @@ export class Update<Shape extends Object> extends CRUDCommandBase {
         super(from);
     }
     async run() {
-        const delegate = this.databaseConnection.sqlGenDelegate;
-        let state = new SQLGenState(delegate);
+        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
         state.command = SQLCommand.update;
         state.updateObjects.push(this.set);
         this.setState(state);
         this.setSQL(state);
-        this.sqlGenState = state;
-        const stat = this.sqlGenState!.statement
+        const stat = state.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
+        await exeDelegate.exe<{}>(state.delegate.bindings);
     }
 }
 
@@ -524,15 +524,14 @@ export class UpdateReturning<Shape extends Object, Returning extends Object> ext
         state.statement.sql += `\nRETURNING *`;
     }
     async rows(): Promise<Returning[]> {
-        const delegate = this.databaseConnection.sqlGenDelegate;
+        const delegate = this.databaseConnection.sqlGenDelegate();
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.update;
         state.updateObjects.push(this.set);
         this.setState(state);
         this.setSQL(state);
-        this.sqlGenState = state;
-        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
-        return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
+        const gen = new SQLTopExeDelegate(state, this.databaseConnection);
+        return await gen.exe<Returning>(state.delegate.bindings ?? []);
     }
     async first(): Promise<Returning> {
         const r = await this.rows();
@@ -545,16 +544,15 @@ export class Insert extends CRUDCommandBase {
         super(from);
     }
     async run() {
-        const delegate = this.databaseConnection.sqlGenDelegate;
+        const delegate = this.databaseConnection.sqlGenDelegate();
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.insert;
         state.updateObjects.push(...this.objects);
         this.setState(state);
         this.setSQL(state);
-        this.sqlGenState = state;
-        const stat = this.sqlGenState!.statement
+        const stat = state.statement
         let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
-        await exeDelegate.exe<{}>(this.sqlGenState!.delegate.bindings);
+        await exeDelegate.exe<{}>(state.delegate.bindings);
     }
 }
 
@@ -567,15 +565,14 @@ export class InsertReturning<Returning extends Object> extends CRUDCommandBase {
         state.statement.sql += ` RETURNING *`;
     }
     async rows(): Promise<Returning[]> {
-        const delegate = this.databaseConnection.sqlGenDelegate;
+        const delegate = this.databaseConnection.sqlGenDelegate();
         let state = new SQLGenState(delegate);
         state.command = SQLCommand.insert;
         state.updateObjects.push(...this.objects);
         this.setState(state);
         this.setSQL(state);
-        this.sqlGenState = state;
-        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
-        return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
+        const gen = new SQLTopExeDelegate(state, this.databaseConnection);
+        return await gen.exe<Returning>(state.delegate.bindings ?? []);
     }
     async first(): Promise<Returning> {
         const r = await this.rows();
