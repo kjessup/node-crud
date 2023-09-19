@@ -73,8 +73,9 @@ export type SQLJoinData = {
 }
 
 export type SQLOrdering = {
-    by: string;
-    desc: boolean;
+    byTable: string;
+    byColumn: string;
+    direction: OrderDirection;
 }
 
 export type SQLLimit = {
@@ -90,6 +91,7 @@ export class SQLGenState {
     accumulatedOrderings: SQLOrdering[] = [];
     currentLimit?: SQLLimit;
     statement: SQLStatement = {sql:'', bindings:[]};
+    updateObjects: Object[] = [];
 
     private aliasCounter = 0;
 
@@ -145,6 +147,18 @@ export class Database {
     }
 }
 
+function handleSet(o: Object): { keys: string[], values: any[] } {
+    let keys: string[] = [];
+    let values: any[] = [];
+    for (let key in o) {
+        if (o.hasOwnProperty(key)) {
+            keys.push(key);
+            values.push((o as any)[key]);
+        }
+    }
+    return { keys, values };
+}
+
 export class Table extends 
         SelectableMixin(
         WhereableMixin(
@@ -163,31 +177,73 @@ export class Table extends
     }
     setSQL(state: SQLGenState): void {
         const { delegate, accumulatedOrderings: orderings, currentLimit: limit } = state;
+        state.accumulatedOrderings = [];
         const t0 = state.tableData[0];
         const tx = state.tableData.splice(1);
-
         const aliasMap: any = state.tableData.reduce((obj, item) => {
             return { 
               ...obj, 
               [item.tableName]: item.alias
             };
           }, {});
-
         const nameQ = delegate.quote(t0.tableName);
         const aliasQ = delegate.quote(t0.alias);
 
         switch (state.command) {
-            case SQLCommand.select, SQLCommand.count: {
-                const sqlStr = 
-                    `SELECT ${state.tableData.map(t => `${t.alias}.*`).join(',')} 
-                    FROM ${nameQ} AS ${aliasQ}`;
-                const joinStr = 
-                    [' ', ...tx.map(t => 
-                    `JOIN ${t.tableName} AS ${t.alias} 
-                        ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`)].join('\n');
-                if (state.whereExpr != undefined) {
-
+            case SQLCommand.select:
+            case SQLCommand.count: {
+                let sqlStr = 
+                    `SELECT ${state.tableData.map(t => `${t.alias}.*`).join(',')} FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => 
+                    `\nJOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                if (state.whereExpr !== undefined) {
+                    sqlStr += 
+                    `\nWHERE ${state.whereExpr.sqlSnippet(state)}`;
                 }
+                if (state.command !== SQLCommand.count) { 
+                    if(orderings !== undefined && orderings.length > 0) {
+                        sqlStr += 
+                        `\nORDER BY ${orderings.map(o => 
+                            `${aliasMap[o.byTable]}.${delegate.quote(o.byColumn)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}`;
+                    }
+                    if (limit !== undefined) {
+                        sqlStr += 
+                        `\nLIMIT ${limit.max} OFFSET ${limit.skip}`;
+                    }
+                } else {
+                    sqlStr = 
+                    `SELECT COUNT(*) AS count FROM (${sqlStr})`;
+                }
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.update: {
+                const kvp = handleSet(state.updateObjects ?? {});
+
+                let sqlStr = 
+                    `UPDATE ${nameQ}\n` +
+                    `SET ${zip(kvp.keys, delegate.bindings.map(e => e[0])).map(o => `${o[0]} = ${o[1]}`)}\n`
+                //if (state.whereExpr !== undefined) {
+                    sqlStr += 
+                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
+                //}
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.insert: {
+                const kvp = handleSet(state.updateObjects ?? {});
+
+                let sqlStr = 
+                    `INSERT INTO ${nameQ}\n`+ 
+                    `(${kvp.keys.join(',')}) VALUES (${delegate.bindings.map(e => e[0])})\n`;
+                //if (state.whereExpr !== undefined) {
+                    sqlStr += 
+                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
+                //}
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
                 break;
             }
             default:
@@ -228,36 +284,18 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
     };
 }
 
-export class Select<Shape extends Object> extends CRUDCommandBase {
-    constructor(from: CRUDObjectBase) {
-        super(from);
-        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate);
-        state.command = SQLCommand.select;
-        this.setState(state);
-        this.setSQL(state);
-        if (state.accumulatedOrderings.length != 0) {
-            throw new CRUDSQLGenError(`Orderings were not consumed: ${state.accumulatedOrderings}`)
-        }
-        this.sqlGenState = state;
-    }
-    async rows(): Promise<Shape[]> {
-        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
-        return await gen.exe<Shape>(this.sqlGenState?.delegate.bindings ?? []);
-    }
-}
-
 export enum OrderDirection {
     ascending, descending
 }
 
 export interface Orderable {
-    order(by: string, direction: OrderDirection): Ordering;
+    order(byTable: string, byColumn: string, direction: OrderDirection): Ordering;
 }
 
 export function OrderableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Orderable {
-        order(by: string, direction: OrderDirection): Ordering {
-            return new Ordering(this, by, direction);
+        order(byTable: string, byColumn: string, direction: OrderDirection): Ordering {
+            return new Ordering(this, byTable, byColumn, direction);
         }
     };
 }
@@ -269,12 +307,12 @@ export class Ordering extends
         WhereableMixin(
         LimitableMixin(
             CRUDFromObjectBase))))) {
-    constructor(from: CRUDObjectBase, public by: string, public direction: OrderDirection) {
+    constructor(from: CRUDObjectBase, public byTable: string, public byColumn: string, public direction: OrderDirection) {
         super(from);
     }
     setSQL(state: SQLGenState): void {
         state.accumulatedOrderings.push(
-            {by: this.by, desc: this.direction == OrderDirection.descending});
+            {byTable: this.byTable, byColumn: this.byColumn, direction: this.direction});
         super.setSQL(state);
     }
 }
@@ -363,24 +401,6 @@ export class Where extends SelectableMixin(CRUDFromObjectBase) {
     }
 }
 
-export interface Updateable {
-    update(): Update;
-}
-
-export function UpdateableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
-    return class extends Base implements Updateable {
-        update(): Update {
-            return new Update(this);
-        }
-    };
-}
-
-export class Update extends CRUDCommandBase {
-    constructor(from: CRUDObjectBase) {
-            super(from);
-        }
-}
-
 export interface Deleteable {
     delete(): Delete;
 }
@@ -408,20 +428,127 @@ export class Delete extends CRUDCommandBase {
     }
 }
 
-export interface Insertable {
-    insert(): Insert;
+export interface Updateable {
+    update<Shape extends Object>(set: Shape): Update<Shape>;
+    updateReturning<Shape extends Object, Returning extends Object>(set: Shape): UpdateReturning<Shape, Returning>;
 }
 
-export function InsertableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
-    return class extends Base implements Insertable {
-        insert(): Insert {
-            return new Insert(this);
+export function UpdateableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
+    return class extends Base implements Updateable {
+        updateReturning<Shape extends Object, Returning extends Object>(set: Shape): UpdateReturning<Shape, Returning> {
+            return new UpdateReturning(this, set);
+        }
+        update<Shape extends Object>(set: Shape): Update<Shape> {
+            return new Update(this, set);
         }
     };
 }
 
-export class Insert extends CRUDCommandBase {
-    constructor(from: CRUDObjectBase) {
-            super(from);
+export interface Insertable {
+    insert<O extends Object>(): Insert;
+    insertReturning<O extends Object, Returning extends Object>(): InsertReturning<Returning>;
+}
+
+export function InsertableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
+    return class extends Base implements Insertable {
+        insertReturning<O extends Object, Returning extends Object>(...objects: O[]): InsertReturning<Returning> {
+            throw new InsertReturning(this, objects);
         }
+        insert<O extends Object>(...objects: O[]): Insert {
+            return new Insert(this, objects);
+        }
+    };
+}
+
+export class Select<Shape extends Object> extends CRUDCommandBase {
+    constructor(from: CRUDObjectBase) {
+        super(from);
+        let state = new SQLGenState(this.databaseConnection.sqlGenDelegate);
+        state.command = SQLCommand.select;
+        this.setState(state);
+        this.setSQL(state);
+        if (state.accumulatedOrderings.length != 0) {
+            throw new CRUDSQLGenError(`Orderings were not consumed: ${state.accumulatedOrderings}`)
+        }
+        this.sqlGenState = state;
+    }
+    async rows(): Promise<Shape[]> {
+        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
+        return await gen.exe<Shape>(this.sqlGenState?.delegate.bindings ?? []);
+    }
+}
+
+// TODO: updated row count
+export class Update<Shape extends Object> extends CRUDCommandBase {
+    constructor(from: CRUDObjectBase, public set: Shape) {
+        super(from);
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.update;
+        state.updateObjects.push(set);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
+        const stat = state.statement
+        let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
+        exeDelegate.exe<{}>(state.delegate.bindings);
+    }
+}
+
+export class UpdateReturning<Shape extends Object, Returning extends Object> extends CRUDCommandBase {
+    constructor(from: CRUDObjectBase, public set: Shape) {
+        super(from);
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.update;
+        state.updateObjects.push(set);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
+    }
+    setSQL(state: SQLGenState): void {
+        this.from.setSQL(state);
+        state.statement.sql += `\nRETURNING *`;
+    }
+    async rows(): Promise<Returning[]> {
+        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
+        return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
+    }
+}
+
+export class Insert extends CRUDCommandBase {
+    constructor(from: CRUDObjectBase, objects: Object[]) {
+        super(from);
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.insert;
+        state.updateObjects.push(objects);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
+        const stat = state.statement
+        let exeDelegate = this.databaseConnection.sqlExeDelegate(stat.sql);
+        exeDelegate.exe<{}>(state.delegate.bindings);
+    }
+}
+
+export class InsertReturning<Returning extends Object> extends CRUDCommandBase {
+    constructor(from: CRUDObjectBase, objects: Object[]) {
+        super(from);
+        const delegate = this.databaseConnection.sqlGenDelegate;
+        let state = new SQLGenState(delegate);
+        state.command = SQLCommand.insert;
+        state.updateObjects.push(objects);
+        this.setState(state);
+        this.setSQL(state);
+        this.sqlGenState = state;
+    }
+    setSQL(state: SQLGenState): void {
+        this.from.setSQL(state);
+        state.statement.sql += `\nRETURNING *`;
+    }
+    async rows(): Promise<Returning[]> {
+        const gen = new SQLTopExeDelegate(this.sqlGenState!, this.databaseConnection);
+        return await gen.exe<Returning>(this.sqlGenState?.delegate.bindings ?? []);
+    }
 }

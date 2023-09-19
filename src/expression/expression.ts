@@ -11,7 +11,7 @@ export abstract class CRUDExpression {
     }
 }
 
-export abstract class CRUDBooleanExpression {
+export abstract class CRUDBooleanExpression extends CRUDExpression {
     
 }
 
