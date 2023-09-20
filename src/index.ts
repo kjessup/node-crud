@@ -225,7 +225,7 @@ export class Table extends
                 let sqlStr = 
                     `SELECT ${state.tableData.map(t => {
                         return t.selectCols.map(c => fmtCol(state, t.tableName, c)).join(',');
-                    }).join(',')} FROM ${nameQ} AS ${aliasQ}`;
+                    }).filter(s => s != '').join(',')} FROM ${nameQ} AS ${aliasQ}`;
                 sqlStr += tx.map(t => 
                     `\nLEFT JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
                 if (state.whereExpr !== undefined) {
@@ -256,7 +256,7 @@ export class Table extends
                 let sqlStr = 
                     `UPDATE ${nameQ}\n` +
                     `SET ${zip(kvp.keys, kvp.values.map(o => any(o))).map(
-                        o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`
+                        o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`;
                 //if (state.whereExpr !== undefined) {
                 sqlStr += 
                     `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
@@ -272,6 +272,17 @@ export class Table extends
                     `INSERT INTO ${nameQ}\n`+ 
                     `(${kvp.keys.join(',')}) VALUES (${kvp.values.map(o => any(o).sqlSnippet(state))})`;
 
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.delete: {
+                let sqlStr = 
+                    `DELETE FROM ${nameQ}\n`;
+                //if (state.whereExpr !== undefined) {
+                sqlStr += 
+                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
+                //}
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
