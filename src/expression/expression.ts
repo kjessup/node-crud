@@ -24,6 +24,24 @@ export class ColumnExpression extends CRUDExpression {
     }
 }
 
+export class ColumnExpression2 extends CRUDExpression {
+    constructor(public table: string, public column: string) {
+        super();
+    }
+    sqlSnippet(state: SQLGenState): string {
+        return state.tableData.filter(t => t.tableName == this.table).map(t => `${t.alias}.${state.delegate.quote(this.column)}`)[0];
+    }
+}
+
+export class OpExpression extends CRUDBooleanExpression {
+    constructor(public op: string, public lhs: CRUDExpression, public rhs: CRUDExpression) {
+        super();
+    }
+    sqlSnippet(state: SQLGenState): string {
+        return `(${this.lhs.sqlSnippet(state)} ${this.op} ${this.rhs.sqlSnippet(state)})`;
+    }
+}
+
 export class AndExpression extends CRUDBooleanExpression {
     constructor(public lhs: CRUDExpression, public rhs: CRUDExpression) {
         super();

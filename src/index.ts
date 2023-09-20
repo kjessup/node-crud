@@ -1,5 +1,5 @@
 
-import { AndExpression, BlobExpression, BoolExpression, CRUDBooleanExpression, CRUDExpression, ColumnExpression, DateExpression, DecimalExpression, EqualityExpression, ExpressionProducer, GreaterThanEqualExpression, GreaterThanExpression, InEqualityExpression, InExpression, IntegerExpression, LazyExpression, LessThanEqualExpression, LessThanExpression, LikeExpression, NotExpression, NullExpression, OrExpression, SBlobExpression, StringExpression, UUIDExpression } from "./expression/expression";
+import { AndExpression, BlobExpression, BoolExpression, CRUDBooleanExpression, CRUDExpression, ColumnExpression, ColumnExpression2, DateExpression, DecimalExpression, EqualityExpression, ExpressionProducer, GreaterThanEqualExpression, GreaterThanExpression, InEqualityExpression, InExpression, IntegerExpression, LazyExpression, LessThanEqualExpression, LessThanExpression, LikeExpression, NotExpression, NullExpression, OpExpression, OrExpression, SBlobExpression, StringExpression, UUIDExpression } from "./expression/expression";
 
 export class CRUDSQLGenError extends Error {}
 export class CRUDSQLExeError extends Error {}
@@ -36,7 +36,6 @@ export class CRUDFromObjectBase extends CRUDObjectBase {
 }
 
 export class CRUDCommandBase extends CRUDFromObjectBase {
-    //sqlGenState?: SQLGenState;
     constructor(from: CRUDObjectBase) {
         super(from);
     }
@@ -61,9 +60,24 @@ export type SQLStatement = {
     bindings: ExpressionBinding[];
 }
 
-export type SQLColumnData = {
+type SQLColumnLiteral = {
     name: string;
     alias?: string;
+}
+
+type SQLColumnExpr = {
+    expr: Expression;
+    alias: string;
+}
+
+export type SQLColumnData = SQLColumnLiteral | SQLColumnExpr;
+
+function fmtCol(state: SQLGenState, table: string, d: SQLColumnData): string {
+    if ('expr' in d) {
+        return `${d.expr.sqlSnippet(state)} AS ${d.alias}`;
+    }
+    const t = state.tableData.filter(t => t.tableName == table)[0];
+    return `${t.alias}.${d.name === '*' ? d.name : state.delegate.quote(d.name)}${d.alias ? ' AS ' + d.alias : ''}`;
 }
 
 export type SQLTableData = {
@@ -80,8 +94,7 @@ export type SQLJoinData = {
 }
 
 export type SQLOrdering = {
-    byTable: string;
-    byColumn: string;
+    by: CRUDExpression;
     direction: OrderDirection;
 }
 
@@ -102,7 +115,7 @@ export class SQLGenState {
 
     aliasCounter = 0;
 
-    addTable(tableName: string, selectCols: SQLColumnData[] = [{name:'*'}], joinData: SQLJoinData | undefined = undefined) {
+    addTable(tableName: string, selectCols: SQLColumnData[], joinData: SQLJoinData | undefined = undefined) {
         this.tableData.push(
             {tableName, selectCols, alias: this.nextAlias(), joinData})
     }
@@ -139,8 +152,11 @@ export class SQLTopExeDelegate implements SQLExeDelegate {
 
 export class Database {
     constructor(public databaseConnection: IDatabaseConnection) {}
-    table(name: string): Table {
-        return new Table(this.databaseConnection, name);
+    table(name: string, columns: SQLColumnData[] = []): Table {
+        if (columns.length == 0) {
+            columns.push({name:'*'});
+        }
+        return new Table(this.databaseConnection, name, columns);
     }
     async run(statement: string, bindings: ExpressionBinding[]): Promise<void> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
@@ -177,11 +193,14 @@ export class Table extends
         LimitableMixin(
         InsertableMixin(
             CRUDObjectBase)))))) {
-    constructor(databaseConnection: IDatabaseConnection, public tableName: string) {
+    constructor(
+            databaseConnection: IDatabaseConnection, 
+            public tableName: string, 
+            public columns: SQLColumnData[]) {
         super(databaseConnection);
     }
     setState(state: SQLGenState): void {
-        state.addTable(this.tableName);
+        state.addTable(this.tableName, this.columns);
     }
     setSQL(state: SQLGenState): void {
         const { delegate, accumulatedOrderings: orderings, currentLimit: limit } = state;
@@ -205,7 +224,7 @@ export class Table extends
             case SQLCommand.count: {
                 let sqlStr = 
                     `SELECT ${state.tableData.map(t => {
-                        return t.selectCols.map(c => `${t.alias}.${c.name}${c.alias ? ` AS ${c.alias}` : ''}`).join(',');
+                        return t.selectCols.map(c => fmtCol(state, t.tableName, c)).join(',');
                     }).join(',')} FROM ${nameQ} AS ${aliasQ}`;
                 sqlStr += tx.map(t => 
                     `\nLEFT JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
@@ -217,7 +236,7 @@ export class Table extends
                     if(orderings !== undefined && orderings.length > 0) {
                         sqlStr += 
                         `\nORDER BY ${orderings.map(o => 
-                            `${aliasMap[o.byTable]}.${delegate.quote(o.byColumn)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}`;
+                            `${o.by.sqlSnippet(state)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}`;
                     }
                     if (limit !== undefined) {
                         sqlStr += 
@@ -300,13 +319,13 @@ export enum OrderDirection {
 }
 
 export interface Orderable {
-    order(byTable: string, byColumn: string, direction: OrderDirection): Ordering;
+    order(by: CRUDExpression, direction: OrderDirection): Ordering;
 }
 
 export function OrderableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Orderable {
-        order(byTable: string, byColumn: string, direction: OrderDirection): Ordering {
-            return new Ordering(this, byTable, byColumn, direction);
+        order(by: CRUDExpression, direction: OrderDirection): Ordering {
+            return new Ordering(this, by, direction);
         }
     };
 }
@@ -318,13 +337,13 @@ export class Ordering extends
         WhereableMixin(
         LimitableMixin(
             CRUDFromObjectBase))))) {
-    constructor(from: CRUDObjectBase, public byTable: string, public byColumn: string, public direction: OrderDirection) {
+    constructor(from: CRUDObjectBase, public by: CRUDExpression, public direction: OrderDirection) {
         super(from);
     }
-    setSQL(state: SQLGenState): void {
+    setState(state: SQLGenState): void {
         state.accumulatedOrderings.push(
-            {byTable: this.byTable, byColumn: this.byColumn, direction: this.direction});
-        super.setSQL(state);
+            {by: this.by, direction: this.direction});
+        super.setState(state);
     }
 }
 
@@ -361,7 +380,11 @@ export interface Joinable {
 
 export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Joinable {
-        join(sourceTable: string, sourceCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[] = [{name:'*'}]): Join {
+        join(sourceTable: string, 
+            sourceCol: string, 
+            joinTable: string, 
+            joinCol: string, 
+            selectCols: SQLColumnData[] = [{name:'*'}]): Join {
             return new Join(this, sourceTable, sourceCol, joinTable, joinCol, selectCols);
         }
     };
@@ -404,9 +427,11 @@ export function WhereableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) 
 }
 
 export class Where extends 
+        LimitableMixin(
+        OrderableMixin(
         UpdateableMixin(
         DeleteableMixin(
-        SelectableMixin(CRUDFromObjectBase))) {
+        SelectableMixin(CRUDFromObjectBase))))) {
     constructor(from: CRUDObjectBase, public expr: CRUDBooleanExpression) {
         super(from);
     }
@@ -587,7 +612,15 @@ export function col(column: string): ColumnExpression {
     return new ColumnExpression(column);
 }
 
+export function col2(table: string, column: string): ColumnExpression {
+    return new ColumnExpression2(table, column);
+}
+
 // Helper for CRUDBooleanExpression
+export function op(op: string, lhs: CRUDExpression, rhs: CRUDExpression): AndExpression {
+    return new OpExpression(op, lhs, rhs);
+}
+
 export function and(lhs: CRUDExpression, rhs: CRUDExpression): AndExpression {
     return new AndExpression(lhs, rhs);
 }
@@ -600,8 +633,12 @@ export function eq(lhs: CRUDExpression, rhs: CRUDExpression): EqualityExpression
     return new EqualityExpression(lhs, rhs);
 }
 
-export function eqCol(lhs: string, rhs: CRUDExpression): EqualityExpression {
-    return new EqualityExpression(col(lhs), rhs);
+export function eqCol(column: string, rhs: CRUDExpression): EqualityExpression {
+    return new EqualityExpression(col(column), rhs);
+}
+
+export function eqCol2(table: string, column: string, rhs: CRUDExpression): EqualityExpression {
+    return new EqualityExpression(col2(table, column), rhs);
 }
 
 export function neq(lhs: CRUDExpression, rhs: CRUDExpression): InEqualityExpression {
