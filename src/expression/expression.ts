@@ -160,7 +160,7 @@ export class IntegerExpression extends CRUDExpression {
         super();
     }
     sqlSnippet(state: SQLGenState): string {
-        return state.delegate.getBinding(this);
+        return `${this.int}`;//state.delegate.getBinding(this);
     }
     primitiveType(): any | undefined {
         return this.int;
@@ -172,7 +172,7 @@ export class DecimalExpression extends CRUDExpression {
         super();
     }
     sqlSnippet(state: SQLGenState): string {
-        return state.delegate.getBinding(this);
+        return `${this.decimal}`;//state.delegate.getBinding(this);
     }
     primitiveType(): any | undefined {
         return this.decimal;
@@ -214,7 +214,6 @@ export class SBlobExpression extends CRUDExpression {
         return this.sblob;
     }
 }
-
 
 export class BoolExpression extends CRUDExpression {
     constructor(public bool: boolean) {
