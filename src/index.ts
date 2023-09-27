@@ -244,7 +244,7 @@ export class Table extends
                     }
                 } else {
                     sqlStr = 
-                    `SELECT COUNT(*) AS c.count FROM (${sqlStr}) AS c`;
+                    `SELECT COUNT(*) AS count FROM (${sqlStr}) AS c`;
                 }
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
