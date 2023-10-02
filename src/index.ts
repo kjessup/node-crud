@@ -326,7 +326,7 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
 }
 
 export enum OrderDirection {
-    ascending, descending
+    ascending = 'ASC', descending = 'DESC'
 }
 
 export interface Orderable {
@@ -648,8 +648,16 @@ export function eqCol(column: string, rhs: CRUDExpression): EqualityExpression {
     return new EqualityExpression(col(column), rhs);
 }
 
+export function neqCol(column: string, rhs: CRUDExpression): InEqualityExpression {
+    return new InEqualityExpression(col(column), rhs);
+}
+
 export function eqCol2(table: string, column: string, rhs: CRUDExpression): EqualityExpression {
     return new EqualityExpression(col2(table, column), rhs);
+}
+
+export function neqCol2(table: string, column: string, rhs: CRUDExpression): InEqualityExpression {
+    return new InEqualityExpression(col2(table, column), rhs);
 }
 
 export function neq(lhs: CRUDExpression, rhs: CRUDExpression): InEqualityExpression {

@@ -65,6 +65,9 @@ export class EqualityExpression extends CRUDBooleanExpression {
         super();
     }
     sqlSnippet(state: SQLGenState): string {
+        if (this.rhs.primitiveType() === undefined) {
+            return `${this.lhs.sqlSnippet(state)} IS NULL`;
+        }
         return `${this.lhs.sqlSnippet(state)} = ${this.rhs.sqlSnippet(state)}`;
     }
 }
@@ -74,6 +77,9 @@ export class InEqualityExpression extends CRUDBooleanExpression {
         super();
     }
     sqlSnippet(state: SQLGenState): string {
+        if (this.rhs.primitiveType() === undefined) {
+            return `${this.lhs.sqlSnippet(state)} IS NOT NULL`;
+        }
         return `${this.lhs.sqlSnippet(state)} <> ${this.rhs.sqlSnippet(state)}`;
     }
 }
