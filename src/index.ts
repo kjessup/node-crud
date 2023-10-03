@@ -158,15 +158,26 @@ export class Database {
         }
         return new Table(this.databaseConnection, name, columns);
     }
-    async run(statement: string, bindings: ExpressionBinding[]): Promise<void> {
+    async run(statement: string, bindings: ExpressionBinding[] = []): Promise<void> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		await delegate.exe<{}>(bindings);
         return;
     }
-    async sql<Shape extends Object>(statement: string, bindings: ExpressionBinding[]): Promise<Shape[]> {
+    async sql<Shape extends Object>(statement: string, bindings: ExpressionBinding[] = []): Promise<Shape[]> {
         let ret: Shape[] = [];
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		return await delegate.exe<Shape>(bindings);
+    }
+    async transaction<Shape extends Object>(body: () => Shape): Promise<Shape> {
+        let ret: Shape | undefined;
+        this.run('BEGIN');
+        try {
+            ret = body();
+        } catch (error) {
+            this.run('ROLLBACK');
+        }
+        this.run('COMMIT');
+        return ret!;
     }
     close() {
         this.databaseConnection.close();
