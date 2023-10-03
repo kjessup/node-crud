@@ -172,7 +172,7 @@ export class Database {
         let ret: Shape | undefined;
         this.run('BEGIN');
         try {
-            ret = body();
+            ret = await body();
         } catch (error) {
             this.run('ROLLBACK');
         }
