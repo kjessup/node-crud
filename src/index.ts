@@ -88,6 +88,7 @@ export type SQLTableData = {
 }
 
 export type SQLJoinData = {
+    joinType: JoinType,
     sourceColumn: string,
     joinTable: string,
     joinColumn: string
@@ -238,7 +239,7 @@ export class Table extends
                         return t.selectCols.map(c => fmtCol(state, t.tableName, c)).join(',');
                     }).filter(s => s != '').join(',')} FROM ${nameQ} AS ${aliasQ}`;
                 sqlStr += tx.map(t => 
-                    `\nLEFT JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                    `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
                 if (state.whereExpr !== undefined) {
                     sqlStr += 
                     `\nWHERE ${state.whereExpr.sqlSnippet(state)}`;
@@ -396,18 +397,23 @@ export class Limit extends
     }
 }
 
+export enum JoinType {
+    inner = '', left = 'LEFT', right = 'RIGHT', full = 'FULL'
+}
+
 export interface Joinable {
-    join(srcTable: string, srcCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[]): Join;
+    join(type: JoinType, srcTable: string, srcCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[]): Join;
 }
 
 export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Joinable {
-        join(sourceTable: string, 
+        join(joinType: JoinType, 
+            sourceTable: string, 
             sourceCol: string, 
             joinTable: string, 
             joinCol: string, 
             selectCols: SQLColumnData[] = [{name:'*'}]): Join {
-            return new Join(this, sourceTable, sourceCol, joinTable, joinCol, selectCols);
+            return new Join(this, joinType, sourceTable, sourceCol, joinTable, joinCol, selectCols);
         }
     };
 }
@@ -420,6 +426,7 @@ export class Join extends
         LimitableMixin(
             CRUDFromObjectBase))))) {
     constructor(from: CRUDObjectBase, 
+        public joinType: JoinType, 
         public sourceTable: string,
         public sourceColumn: string,
         public joinTable: string,
@@ -430,6 +437,7 @@ export class Join extends
     setState(state: SQLGenState): void {
         super.setState(state);
         state.addTable(this.sourceTable, this.selectCols, {
+            joinType: this.joinType,
             sourceColumn: this.sourceColumn,
             joinTable: this.joinTable,
             joinColumn: this.joinColumn});
