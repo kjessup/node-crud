@@ -171,13 +171,13 @@ export class Database {
     }
     async transaction<Shape extends Object>(body: () => Shape): Promise<Shape> {
         let ret: Shape | undefined;
-        this.run('BEGIN');
+        await this.run('BEGIN');
         try {
             ret = await body();
         } catch (error) {
-            this.run('ROLLBACK');
+            await this.run('ROLLBACK');
         }
-        this.run('COMMIT');
+        await this.run('COMMIT');
         return ret!;
     }
     close() {
