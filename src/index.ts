@@ -176,6 +176,7 @@ export class Database {
             ret = await body();
         } catch (error) {
             await this.run('ROLLBACK');
+            throw error;
         }
         await this.run('COMMIT');
         return ret!;
