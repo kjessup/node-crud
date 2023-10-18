@@ -148,7 +148,7 @@ export class LikeExpression extends CRUDBooleanExpression {
         super();
     }
     sqlSnippet(state: SQLGenState): string {
-        const lstr = `${this.wild1 ? '%' : ''}${this.string.replace(/%/g, '\\%')}${this.wild2 ? '%' : ''}`;
+        const lstr = `${this.wild1 ? '%' : ''}${this.string.replace(/\\/g, '\\\\').replace(/%/g, '\\%')}${this.wild2 ? '%' : ''}`;
         this.rhs = new StringExpression(lstr);
         return `(${this.lhs.sqlSnippet(state)} LIKE ${this.rhs.sqlSnippet(state)})`;
     }
