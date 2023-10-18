@@ -332,7 +332,7 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
             
             const stat = state.statement.sql;
 		    const exeDelegate = this.databaseConnection.sqlExeDelegate(stat);
-            const results = await exeDelegate.exe<{count:number}>([]);
+            const results = await exeDelegate.exe<{count:number}>(state.statement.bindings);
             return results[0].count;
         }
     };
