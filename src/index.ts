@@ -657,7 +657,7 @@ export function and(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpre
 }
 
 export function or(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpression[]): OrExpression {
-    return new OrExpression(lhs, rhs);
+    return new OrExpression(lhs, rhs, ...rest);
 }
 
 export function eq(lhs: CRUDExpression, rhs: CRUDExpression): EqualityExpression {
