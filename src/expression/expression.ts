@@ -43,20 +43,24 @@ export class OpExpression extends CRUDBooleanExpression {
 }
 
 export class AndExpression extends CRUDBooleanExpression {
-    constructor(public lhs: CRUDExpression, public rhs: CRUDExpression) {
+    public operands: CRUDExpression[]
+    constructor(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpression[]) {
         super();
+        this.operands = [lhs, rhs, ...rest];
     }
     sqlSnippet(state: SQLGenState): string {
-        return `(${this.lhs.sqlSnippet(state)} AND ${this.rhs.sqlSnippet(state)})`;
+        return `(${this.operands.map(o => o.sqlSnippet(state)).join(' AND ')})`;
     }
 }
 
 export class OrExpression extends CRUDBooleanExpression {
-    constructor(public lhs: CRUDExpression, public rhs: CRUDExpression) {
+    public operands: CRUDExpression[]
+    constructor(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpression[]) {
         super();
+        this.operands = [lhs, rhs, ...rest];
     }
     sqlSnippet(state: SQLGenState): string {
-        return `(${this.lhs.sqlSnippet(state)} OR ${this.rhs.sqlSnippet(state)})`;
+        return `(${this.operands.map(o => o.sqlSnippet(state)).join(' OR ')})`;
     }
 }
 
