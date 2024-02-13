@@ -279,12 +279,12 @@ export class Table extends
                 break;
             }
             case SQLCommand.insert: {
-                const kvp = handleSet(state.updateObjects[0] ?? {});
-
-                let sqlStr = 
-                    `INSERT INTO ${nameQ}\n`+ 
-                    `(${kvp.keys.join(',')}) VALUES (${kvp.values.map(o => any(o).sqlSnippet(state))})`;
-
+                const stats = state.updateObjects.map(uo => {
+                    const kvp = handleSet(uo);
+                    return `INSERT INTO ${nameQ}\n`+ 
+                        `(${kvp.keys.join(',')}) VALUES (${kvp.values.map(o => any(o).sqlSnippet(state))})`;
+                })
+                const sqlStr = stats.join(';\n');
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
@@ -648,15 +648,15 @@ export function col2(table: string, column: string): ColumnExpression {
 }
 
 // Helper for CRUDBooleanExpression
-export function op(op: string, lhs: CRUDExpression, rhs: CRUDExpression): AndExpression {
+export function op(op: string, lhs: CRUDExpression, rhs: CRUDExpression): OpExpression {
     return new OpExpression(op, lhs, rhs);
 }
 
-export function and(lhs: CRUDExpression, rhs: CRUDExpression): AndExpression {
-    return new AndExpression(lhs, rhs);
+export function and(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpression[]): AndExpression {
+    return new AndExpression(lhs, rhs, ...rest);
 }
 
-export function or(lhs: CRUDExpression, rhs: CRUDExpression): OrExpression {
+export function or(lhs: CRUDExpression, rhs: CRUDExpression, ...rest: CRUDExpression[]): OrExpression {
     return new OrExpression(lhs, rhs);
 }
 
