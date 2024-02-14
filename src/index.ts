@@ -279,12 +279,13 @@ export class Table extends
                 break;
             }
             case SQLCommand.insert: {
+                const kvp = handleSet(state.updateObjects[0] || {});
+                const sqlStart = `INSERT INTO ${nameQ} (${kvp.keys.join(',')}) VALUES `;
                 const stats = state.updateObjects.map(uo => {
                     const kvp = handleSet(uo);
-                    return `INSERT INTO ${nameQ}\n`+ 
-                        `(${kvp.keys.join(',')}) VALUES (${kvp.values.map(o => any(o).sqlSnippet(state))})`;
+                    return `(${kvp.values.map(o => any(o).sqlSnippet(state))})`;
                 })
-                const sqlStr = stats.join(';\n');
+                const sqlStr = `${sqlStart}${stats.join(', ')}`;
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
