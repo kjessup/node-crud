@@ -1,4 +1,4 @@
-import { CRUDSQLGenError, SQLGenState } from "..";
+import { CRUDSQLGenError, SQLGenState } from '../index.js';
 
 export type ExpressionProducer = () => CRUDExpression;
 

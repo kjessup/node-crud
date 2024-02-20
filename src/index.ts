@@ -1,4 +1,4 @@
-
+import 'reflect-metadata';
 import { AndExpression, BlobExpression, BoolExpression, CRUDBooleanExpression, CRUDExpression, ColumnExpression, ColumnExpression2, DateExpression, DecimalExpression, EqualityExpression, ExpressionProducer, GreaterThanEqualExpression, GreaterThanExpression, InEqualityExpression, InExpression, IntegerExpression, LazyExpression, LessThanEqualExpression, LessThanExpression, LikeExpression, NotExpression, NullExpression, OpExpression, OrExpression, SBlobExpression, StringExpression, UUIDExpression } from "./expression/expression";
 
 export class CRUDSQLGenError extends Error {}
@@ -153,11 +153,11 @@ export class SQLTopExeDelegate implements SQLExeDelegate {
 
 export class Database {
     constructor(public databaseConnection: IDatabaseConnection) {}
-    table(name: string, columns: SQLColumnData[] = []): Table {
+    table<T extends Object>(table: TableType<T>, columns: SQLColumnData[] = []): TableBase {
         if (columns.length == 0) {
             columns.push({name:'*'});
         }
-        return new Table(this.databaseConnection, name, columns);
+        return new TableBase(this.databaseConnection, table.tableName, columns);
     }
     async run(statement: string, bindings: ExpressionBinding[] = []): Promise<void> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
@@ -198,7 +198,59 @@ function handleSet(o: Object): { keys: string[], values: any[] } {
     return { keys, values };
 }
 
-export class Table extends 
+// -- new meta
+const metadataKey = Symbol('modelMetadata');
+const tableMetadataKey = Symbol('tableName');
+
+export type TableColumnMetadata = {
+    name: string;
+    table: string;
+};
+
+type MetaType<T> = {
+    readonly [P in keyof T]-?: TableColumnMetadata;
+};
+
+export type TableType<T extends Object> = MetaType<T> & {
+    tableName: string;
+}
+
+export function Table(tableName: string): ClassDecorator {
+    return function (constructor: Function) {
+        Reflect.defineMetadata(tableMetadataKey, tableName, constructor);
+    };
+}
+
+export function Column(columnName?: string): PropertyDecorator {
+    return function (target: Object, propertyKey: string | symbol) {
+        const columnActualName = columnName || propertyKey.toString();
+        const existingColumns = Reflect.getMetadata(metadataKey, target.constructor) || {};
+        existingColumns[propertyKey] = { name: columnActualName, propertyKey: propertyKey.toString() };
+        Reflect.defineMetadata(metadataKey, existingColumns, target.constructor);
+    };
+}
+
+export function generateMetadata<T extends Object>(target: new () => T): TableType<T> {
+    const tableName = Reflect.getMetadata(tableMetadataKey, target) || target.name.toLowerCase();
+    const properties: Record<string, any> = Reflect.getMetadata(metadataKey, target) || {};
+    const columns: Record<string, TableColumnMetadata> = Object.keys(properties).reduce((acc, propertyKey) => {
+        const propertyMetadata = properties[propertyKey];
+        acc[propertyKey] = {
+            name: propertyMetadata.name || propertyKey, // Assuming there's a 'name' in the metadata; adjust as needed
+            table: tableName
+        };
+        return acc;
+    }, {} as Record<string, TableColumnMetadata>);
+    return { tableName, ...columns } as TableType<T>;
+}
+
+// export function table<T extends Object>(db: Database, table: TableType<T>, columns?: SQLColumnData[]) {
+//     return db.table(table.tableName, columns);
+// }
+
+// -- 
+
+export class TableBase extends 
         SelectableMixin(
         WhereableMixin(
         JoinableMixin(
@@ -639,15 +691,6 @@ export class InsertReturning<Returning extends Object> extends CRUDCommandBase {
 
 // -------
 
-// Helper for ColumnExpression
-export function col(column: string): ColumnExpression {
-    return new ColumnExpression(column);
-}
-
-export function col2(table: string, column: string): ColumnExpression {
-    return new ColumnExpression2(table, column);
-}
-
 // Helper for CRUDBooleanExpression
 export function op(op: string, lhs: CRUDExpression, rhs: CRUDExpression): OpExpression {
     return new OpExpression(op, lhs, rhs);
@@ -665,20 +708,20 @@ export function eq(lhs: CRUDExpression, rhs: CRUDExpression): EqualityExpression
     return new EqualityExpression(lhs, rhs);
 }
 
-export function eqCol(column: string, rhs: CRUDExpression): EqualityExpression {
+export function col2(name: string): ColumnExpression {
+    return new ColumnExpression(name);
+}
+
+export function col(column: TableColumnMetadata): ColumnExpression {
+    return new ColumnExpression2(column.table, column.name);
+}
+
+export function eqCol(column: TableColumnMetadata, rhs: CRUDExpression): EqualityExpression {
     return new EqualityExpression(col(column), rhs);
 }
 
-export function neqCol(column: string, rhs: CRUDExpression): InEqualityExpression {
+export function neqCol(column: TableColumnMetadata, rhs: CRUDExpression): InEqualityExpression {
     return new InEqualityExpression(col(column), rhs);
-}
-
-export function eqCol2(table: string, column: string, rhs: CRUDExpression): EqualityExpression {
-    return new EqualityExpression(col2(table, column), rhs);
-}
-
-export function neqCol2(table: string, column: string, rhs: CRUDExpression): InEqualityExpression {
-    return new InEqualityExpression(col2(table, column), rhs);
 }
 
 export function neq(lhs: CRUDExpression, rhs: CRUDExpression): InEqualityExpression {

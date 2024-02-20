@@ -22,5 +22,8 @@
   "homepage": "https://github.com/kjessup/node-crud#readme",
   "devDependencies": {
     "@types/node": "^20.6.0"
+  },
+  "dependencies": {
+    "reflect-metadata": "^0.2.1"
   }
 }
