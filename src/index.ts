@@ -169,7 +169,7 @@ export class Database {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		return await delegate.exe<Shape>(bindings);
     }
-    async transaction<Shape extends Object>(body: () => Shape): Promise<Shape> {
+    async transaction<Shape>(body: () => Promise<Shape>): Promise<Shape> {
         let ret: Shape | undefined;
         await this.run('BEGIN');
         try {
