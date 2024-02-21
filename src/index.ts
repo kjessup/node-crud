@@ -319,7 +319,7 @@ export class TableBase extends
                 const kvp = handleSet(state.updateObjects[0] ?? {});
 
                 let sqlStr = 
-                    `UPDATE ${nameQ}\n` +
+                    `UPDATE ${nameQ} AS ${aliasQ}\n` +
                     `SET ${zip(kvp.keys, kvp.values.map(o => any(o))).map(
                         o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`;
                 //if (state.whereExpr !== undefined) {
@@ -332,7 +332,7 @@ export class TableBase extends
             }
             case SQLCommand.insert: {
                 const kvp = handleSet(state.updateObjects[0] || {});
-                const sqlStart = `INSERT INTO ${nameQ} (${kvp.keys.join(',')}) VALUES `;
+                const sqlStart = `INSERT INTO ${nameQ} AS ${aliasQ} (${kvp.keys.join(',')}) VALUES `;
                 const stats = state.updateObjects.map(uo => {
                     const kvp = handleSet(uo);
                     return `(${kvp.values.map(o => any(o).sqlSnippet(state))})`;
@@ -344,11 +344,9 @@ export class TableBase extends
             }
             case SQLCommand.delete: {
                 let sqlStr = 
-                    `DELETE FROM ${nameQ}\n`;
-                //if (state.whereExpr !== undefined) {
+                    `DELETE FROM ${nameQ} AS ${aliasQ}\n`;
                 sqlStr += 
                     `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
-                //}
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
