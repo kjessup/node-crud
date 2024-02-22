@@ -52,7 +52,7 @@ export interface SQLGenDelegate {
 }
 
 export enum SQLCommand {
-    select, insert, update, delete, count, unknown
+    select, insert, update, delete, count, min, max, avg, unknown
 }
 
 export type SQLStatement = {
@@ -113,6 +113,7 @@ export class SQLGenState {
     currentLimit?: SQLLimit;
     statement: SQLStatement = {sql:'', bindings:[]};
     updateObjects: Object[] = [];
+    aggregateExpr?: CRUDExpression;
 
     aliasCounter = 0;
 
@@ -244,10 +245,6 @@ export function generateMetadata<T extends Object>(target: new () => T): TableTy
     return { tableName, ...columns } as TableType<T>;
 }
 
-// export function table<T extends Object>(db: Database, table: TableType<T>, columns?: SQLColumnData[]) {
-//     return db.table(table.tableName, columns);
-// }
-
 // -- 
 
 export class TableBase extends 
@@ -264,6 +261,7 @@ export class TableBase extends
             public columns: SQLColumnData[]) {
         super(databaseConnection);
     }
+    column?: CRUDExpression;
     setState(state: SQLGenState): void {
         state.addTable(this.tableName, this.columns);
     }
@@ -284,47 +282,64 @@ export class TableBase extends
         const nameQ = delegate.quote(t0.tableName);
         const aliasQ = delegate.quote(t0.alias);
 
+        const whereClauseF = () => (state.whereExpr !== undefined) ? `\nWHERE ${state.whereExpr.sqlSnippet(state)}` : '';
+        const orderClauseF = () => (orderings !== undefined && orderings.length > 0) ? `\nORDER BY ${orderings.map(o => `${o.by.sqlSnippet(state)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}` : ''
+        const limitClauseF = () => (limit !== undefined) ? `\nLIMIT ${limit.max} OFFSET ${limit.skip}` : '';
+        
         switch (state.command) {
-            case SQLCommand.select:
+            case SQLCommand.select: {
+                let sqlStr = `SELECT ${state.tableData.map(t => {
+                    return t.selectCols.map(c => fmtCol(state, t.tableName, c)).join(',');
+                }).filter(s => s != '').join(',')} FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                sqlStr += `${whereClauseF()}${orderClauseF()}${limitClauseF()}`;
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
             case SQLCommand.count: {
-                let sqlStr = 
-                    `SELECT ${state.tableData.map(t => {
-                        return t.selectCols.map(c => fmtCol(state, t.tableName, c)).join(',');
-                    }).filter(s => s != '').join(',')} FROM ${nameQ} AS ${aliasQ}`;
-                sqlStr += tx.map(t => 
-                    `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
-                if (state.whereExpr !== undefined) {
-                    sqlStr += 
-                    `\nWHERE ${state.whereExpr.sqlSnippet(state)}`;
-                }
-                if (state.command !== SQLCommand.count) { 
-                    if(orderings !== undefined && orderings.length > 0) {
-                        sqlStr += 
-                        `\nORDER BY ${orderings.map(o => 
-                            `${o.by.sqlSnippet(state)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}`;
-                    }
-                    if (limit !== undefined) {
-                        sqlStr += 
-                        `\nLIMIT ${limit.max} OFFSET ${limit.skip}`;
-                    }
-                } else {
-                    sqlStr = 
-                    `SELECT COUNT(*) AS count FROM (${sqlStr}) AS c`;
-                }
+                let col = state.aggregateExpr ? state.aggregateExpr.sqlSnippet(state) : '*';
+                let sqlStr = `SELECT COUNT(${col}) as result FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                sqlStr += `${whereClauseF()}${limitClauseF()}`;
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.min: {
+                let col = state.aggregateExpr?.sqlSnippet(state);
+                let sqlStr = `SELECT MIN(${col}) as result FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                sqlStr += `${whereClauseF()}${limitClauseF()}`;
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.max: {
+                let col = state.aggregateExpr?.sqlSnippet(state);
+                let sqlStr = `SELECT MAX(${col}) as result FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                sqlStr += `${whereClauseF()}${limitClauseF()}`;
+                state.statement.sql = sqlStr;
+                state.statement.bindings = delegate.bindings;
+                break;
+            }
+            case SQLCommand.avg: {
+                let col = state.aggregateExpr?.sqlSnippet(state);
+                let sqlStr = `SELECT AVG(${col}) as result FROM ${nameQ} AS ${aliasQ}`;
+                sqlStr += tx.map(t => `\n${t.joinData?.joinType} JOIN ${delegate.quote(t.tableName)} AS ${t.alias} ON ${t.alias}.${t.joinData?.sourceColumn} = ${aliasMap[t.joinData!.joinTable]}.${t.joinData?.joinColumn}`).join('');
+                sqlStr += `${whereClauseF()}${limitClauseF()}`;
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
             }
             case SQLCommand.update: {
                 const kvp = handleSet(state.updateObjects[0] ?? {});
-
-                let sqlStr = 
-                    `UPDATE ${nameQ} AS ${aliasQ}\n` +
-                    `SET ${zip(kvp.keys, kvp.values.map(o => any(o))).map(
-                        o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`;
+                let sqlStr = `UPDATE ${nameQ} AS ${aliasQ}\n` +
+                    `SET ${zip(kvp.keys, kvp.values.map(o => any(o))).map(o => `${delegate.quote(o[0])} = ${o[1].sqlSnippet(state)}`)}\n`;
                 //if (state.whereExpr !== undefined) {
-                sqlStr += 
-                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
+                sqlStr +=
+                    `WHERE ${state.whereExpr?.sqlSnippet(state)}`;
                 //}
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
@@ -336,17 +351,16 @@ export class TableBase extends
                 const stats = state.updateObjects.map(uo => {
                     const kvp = handleSet(uo);
                     return `(${kvp.values.map(o => any(o).sqlSnippet(state))})`;
-                })
+                });
                 const sqlStr = `${sqlStart}${stats.join(', ')}`;
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
             }
             case SQLCommand.delete: {
-                let sqlStr = 
-                    `DELETE FROM ${nameQ} AS ${aliasQ}\n`;
-                sqlStr += 
-                    `WHERE ${state.whereExpr!.sqlSnippet(state)}`;
+                let sqlStr = `DELETE FROM ${nameQ} AS ${aliasQ}\n`;
+                sqlStr +=
+                    `WHERE ${state.whereExpr?.sqlSnippet(state)}`;
                 state.statement.sql = sqlStr;
                 state.statement.bindings = delegate.bindings;
                 break;
@@ -361,6 +375,9 @@ export interface Selectable {
     select<Shape extends Object>(): Select<Shape>;
     first<Shape extends Object>(): Promise<Shape | undefined>;
     count(): Promise<number>;
+    min(column: CRUDExpression): Promise<number>;
+    max(column: CRUDExpression): Promise<number>;
+    avg(column: CRUDExpression): Promise<number>;
 }
 
 export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
@@ -368,6 +385,7 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
         select<Shape extends Object>(): Select<Shape> {
             return new Select(this);
         }
+
         async first<Shape extends Object>(): Promise<Shape | undefined> {
             const rows = await this.select<Shape>().rows();
             for (let row of rows) {
@@ -375,16 +393,38 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
             }
             return undefined;
         }
-        async count(): Promise<number> {
-            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
-            state.command = SQLCommand.count;
+        async _inner(state: SQLGenState): Promise<number> {
             this.setState(state);
             this.setSQL(state);
             
             const stat = state.statement.sql;
 		    const exeDelegate = this.databaseConnection.sqlExeDelegate(stat);
-            const results = await exeDelegate.exe<{count:number}>(state.statement.bindings);
-            return results[0].count;
+            const results = await exeDelegate.exe<{result:number}>(state.statement.bindings);
+            return results[0].result;
+        }
+
+        async count(): Promise<number> {
+            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
+            state.command = SQLCommand.count;
+            return this._inner(state);
+        }
+        async min(column: CRUDExpression): Promise<number> {
+            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
+            state.command = SQLCommand.min;
+            state.aggregateExpr = column;
+            return this._inner(state);
+        }
+        async max(column: CRUDExpression): Promise<number> {
+            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
+            state.command = SQLCommand.max;
+            state.aggregateExpr = column;
+            return this._inner(state);
+        }
+        async avg(column: CRUDExpression): Promise<number> {
+            let state = new SQLGenState(this.databaseConnection.sqlGenDelegate());
+            state.command = SQLCommand.avg;
+            state.aggregateExpr = column;
+            return this._inner(state);
         }
     };
 }
@@ -440,12 +480,12 @@ export class Limit extends
         SelectableMixin(
         WhereableMixin(
             CRUDFromObjectBase)))) {
-    constructor(from: CRUDObjectBase, public max: number, public skip: number) {
+    constructor(from: CRUDObjectBase, public maximum: number, public skip: number) {
         super(from);
     }
     setState(state: SQLGenState): void {
         super.setState(state);
-        state.currentLimit = {max: this.max, skip: this.skip};
+        state.currentLimit = {max: this.maximum, skip: this.skip};
     }
 }
 
@@ -454,18 +494,16 @@ export enum JoinType {
 }
 
 export interface Joinable {
-    join(type: JoinType, srcTable: string, srcCol: string, joinTable: string, joinCol: string, selectCols: SQLColumnData[]): Join;
+    join(type: JoinType, srcTable: TableColumnMetadata, joinTable: TableColumnMetadata, selectCols: SQLColumnData[]): Join;
 }
 
 export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Joinable {
         join(joinType: JoinType, 
-            sourceTable: string, 
-            sourceCol: string, 
-            joinTable: string, 
-            joinCol: string, 
+            sourceTable: TableColumnMetadata, 
+            joinTable: TableColumnMetadata, 
             selectCols: SQLColumnData[] = [{name:'*'}]): Join {
-            return new Join(this, joinType, sourceTable, sourceCol, joinTable, joinCol, selectCols);
+            return new Join(this, joinType, sourceTable.table, sourceTable.name, joinTable.table, joinTable.name, selectCols);
         }
     };
 }

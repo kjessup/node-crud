@@ -7,6 +7,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "tsc:watch": "npx tsc --watch",
+    "tsc:build": "npx tsc",
     "prepublish": "npx tsc",
     "prepare": "npx tsc"
   },
