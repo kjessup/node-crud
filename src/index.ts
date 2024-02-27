@@ -5,7 +5,7 @@ export class CRUDSQLGenError extends Error {}
 export class CRUDSQLExeError extends Error {}
 
 export type Expression = CRUDExpression;
-export type ExpressionBinding = [string, Expression];
+export type ExpressionBinding = Expression | [string, Expression];
 export type ObjectBinding = [string, any];
 export type Bindings = ObjectBinding[];
 
