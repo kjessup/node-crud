@@ -1,8 +1,8 @@
 import 'reflect-metadata';
 import { AndExpression, BlobExpression, BoolExpression, CRUDBooleanExpression, CRUDExpression, ColumnExpression, ColumnExpression2, DateExpression, DecimalExpression, EqualityExpression, ExpressionProducer, GreaterThanEqualExpression, GreaterThanExpression, InEqualityExpression, InExpression, IntegerExpression, LazyExpression, LessThanEqualExpression, LessThanExpression, LikeExpression, NotExpression, NullExpression, OpExpression, OrExpression, SBlobExpression, StringExpression, UUIDExpression } from "./expression/expression";
 
-export class CRUDSQLGenError extends Error {}
-export class CRUDSQLExeError extends Error {}
+export class CRUDSQLGenError extends Error { }
+export class CRUDSQLExeError extends Error { }
 
 export type Expression = CRUDExpression;
 export type ExpressionBinding = Expression | [string, Expression];
@@ -41,13 +41,13 @@ export class CRUDCommandBase extends CRUDFromObjectBase {
     }
 }
 
-export interface SQLExeDelegate { 
+export interface SQLExeDelegate {
     exe<Shape extends Object>(bindings: ExpressionBinding[]): Promise<Shape[]>;
 }
 
-export interface SQLGenDelegate { 
+export interface SQLGenDelegate {
     bindings: ExpressionBinding[];
-	getBinding(forExpr: Expression): string;
+    getBinding(forExpr: Expression): string;
     quote(identifier: string): string;
 }
 
@@ -100,7 +100,7 @@ export type SQLOrdering = {
 }
 
 export type SQLLimit = {
-    max: number, 
+    max: number,
     skip: number
 }
 
@@ -111,7 +111,7 @@ export class SQLGenState {
     whereExpr?: CRUDBooleanExpression;
     accumulatedOrderings: SQLOrdering[] = [];
     currentLimit?: SQLLimit;
-    statement: SQLStatement = {sql:'', bindings:[]};
+    statement: SQLStatement = { sql: '', bindings: [] };
     updateObjects: Object[] = [];
     aggregateExpr?: CRUDExpression;
 
@@ -119,7 +119,7 @@ export class SQLGenState {
 
     addTable(tableName: string, selectCols: SQLColumnData[], joinData: SQLJoinData | undefined = undefined) {
         this.tableData.push(
-            {tableName, selectCols, alias: this.nextAlias(), joinData})
+            { tableName, selectCols, alias: this.nextAlias(), joinData })
     }
 
     private nextAlias(): string {
@@ -135,7 +135,7 @@ type MasterTable = {
 function zip<A, B>(a: A[], b: B[]): [A, B][] {
     const length = Math.min(a.length, b.length);
     const zipped: [A, B][] = [];
-    for(let i = 0; i < length; i++) {
+    for (let i = 0; i < length; i++) {
         zipped.push([a[i], b[i]]);
     }
     return zipped;
@@ -145,29 +145,42 @@ export class SQLTopExeDelegate implements SQLExeDelegate {
     master: MasterTable;
 
     constructor(public state: SQLGenState, database: IDatabaseConnection) {
-        this.master = {table: state.tableData[0], delegate: database.sqlExeDelegate(state.statement.sql)};
+        this.master = { table: state.tableData[0], delegate: database.sqlExeDelegate(state.statement.sql) };
     }
     exe<Shape extends Object>(bindings: ExpressionBinding[]): Promise<Shape[]> {
         return this.master?.delegate.exe(bindings);
-    }    
+    }
 }
 
 export class Database {
-    constructor(public databaseConnection: IDatabaseConnection) {}
+    constructor(public databaseConnection: IDatabaseConnection) { }
     table<T extends Object>(table: TableType<T>, ...columns: SQLColumnData[]): TableBase {
         if (columns.length == 0) {
-            columns.push({name:'*'});
+            columns.push({ name: '*' });
         }
         return new TableBase(this.databaseConnection, table.tableName, columns);
     }
     async run(statement: string, ...bindings: ExpressionBinding[]): Promise<void> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
-		await delegate.exe<{}>(bindings);
+        await delegate.exe<{}>(bindings);
         return;
     }
     async sql<Shape extends Object>(statement: string, ...bindings: ExpressionBinding[]): Promise<Shape[]> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
-		return await delegate.exe<Shape>(bindings);
+        return await delegate.exe<Shape>(bindings);
+    }
+    async q<Shape extends Object>(parts: TemplateStringsArray, ...values: any[]): Promise<Shape[]> {
+        let text = '';
+        const bindValues: any[] = [];
+        // Iterate through the parts of the template string
+        parts.forEach((part, index) => {
+            text += part; // Add the current static part to the text
+            if (index < values.length) {
+                bindValues.push(values[index]); // Push the current value to the bindValues array
+                text += `$${index + 1}`; // Add the parameter marker to the text
+            }
+        });
+        return await this.sql(text, ...bindValues);
     }
     async transaction<Shape>(body: () => Promise<Shape>): Promise<Shape> {
         let ret: Shape | undefined;
@@ -246,18 +259,18 @@ export function generateMetadata<T extends Object>(target: new () => T): TableTy
 
 // -- 
 
-export class TableBase extends 
-        SelectableMixin(
+export class TableBase extends
+    SelectableMixin(
         WhereableMixin(
-        JoinableMixin(
-        OrderableMixin(
-        LimitableMixin(
-        InsertableMixin(
-            CRUDObjectBase)))))) {
+            JoinableMixin(
+                OrderableMixin(
+                    LimitableMixin(
+                        InsertableMixin(
+                            CRUDObjectBase)))))) {
     constructor(
-            databaseConnection: IDatabaseConnection, 
-            public tableName: string, 
-            public columns: SQLColumnData[]) {
+        databaseConnection: IDatabaseConnection,
+        public tableName: string,
+        public columns: SQLColumnData[]) {
         super(databaseConnection);
     }
     column?: CRUDExpression;
@@ -273,18 +286,18 @@ export class TableBase extends
         const t0 = state.tableData[0];
         const tx = Array(...state.tableData).splice(1);
         const aliasMap: any = state.tableData.reduce((obj, item) => {
-            return { 
-              ...obj, 
-              [item.tableName]: item.alias
+            return {
+                ...obj,
+                [item.tableName]: item.alias
             };
-          }, {});
+        }, {});
         const nameQ = delegate.quote(t0.tableName);
         const aliasQ = delegate.quote(t0.alias);
 
         const whereClauseF = () => (state.whereExpr !== undefined) ? `\nWHERE ${state.whereExpr.sqlSnippet(state)}` : '';
         const orderClauseF = () => (orderings !== undefined && orderings.length > 0) ? `\nORDER BY ${orderings.map(o => `${o.by.sqlSnippet(state)}${o.direction == OrderDirection.descending ? ' DESC' : ''}`).join(',')}` : ''
         const limitClauseF = () => (limit !== undefined) ? `\nLIMIT ${limit.max} OFFSET ${limit.skip}` : '';
-        
+
         switch (state.command) {
             case SQLCommand.select: {
                 let sqlStr = `SELECT ${state.tableData.map(t => {
@@ -395,10 +408,10 @@ export function SelectableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T)
         async _inner(state: SQLGenState): Promise<number> {
             this.setState(state);
             this.setSQL(state);
-            
+
             const stat = state.statement.sql;
-		    const exeDelegate = this.databaseConnection.sqlExeDelegate(stat);
-            const results = await exeDelegate.exe<{result:number}>(state.statement.bindings);
+            const exeDelegate = this.databaseConnection.sqlExeDelegate(stat);
+            const results = await exeDelegate.exe<{ result: number }>(state.statement.bindings);
             return results[0].result;
         }
 
@@ -444,19 +457,19 @@ export function OrderableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) 
     };
 }
 
-export class Ordering extends 
-        OrderableMixin(
+export class Ordering extends
+    OrderableMixin(
         JoinableMixin(
-        SelectableMixin(
-        WhereableMixin(
-        LimitableMixin(
-            CRUDFromObjectBase))))) {
+            SelectableMixin(
+                WhereableMixin(
+                    LimitableMixin(
+                        CRUDFromObjectBase))))) {
     constructor(from: CRUDObjectBase, public by: CRUDExpression, public direction: OrderDirection) {
         super(from);
     }
     setState(state: SQLGenState): void {
         state.accumulatedOrderings.push(
-            {by: this.by, direction: this.direction});
+            { by: this.by, direction: this.direction });
         super.setState(state);
     }
 }
@@ -473,18 +486,18 @@ export function LimitableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) 
     };
 }
 
-export class Limit extends 
-        OrderableMixin(
+export class Limit extends
+    OrderableMixin(
         JoinableMixin(
-        SelectableMixin(
-        WhereableMixin(
-            CRUDFromObjectBase)))) {
+            SelectableMixin(
+                WhereableMixin(
+                    CRUDFromObjectBase)))) {
     constructor(from: CRUDObjectBase, public maximum: number, public skip: number) {
         super(from);
     }
     setState(state: SQLGenState): void {
         super.setState(state);
-        state.currentLimit = {max: this.maximum, skip: this.skip};
+        state.currentLimit = { max: this.maximum, skip: this.skip };
     }
 }
 
@@ -498,28 +511,28 @@ export interface Joinable {
 
 export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Joinable {
-        join(joinType: JoinType, 
-            sourceTable: TableColumnMetadata, 
-            joinTable: TableColumnMetadata, 
-            selectCols: SQLColumnData[] = [{name:'*'}]): Join {
+        join(joinType: JoinType,
+            sourceTable: TableColumnMetadata,
+            joinTable: TableColumnMetadata,
+            selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
             return new Join(this, joinType, sourceTable.table, sourceTable.name, joinTable.table, joinTable.name, selectCols);
         }
     };
 }
 
-export class Join extends 
-        WhereableMixin(
+export class Join extends
+    WhereableMixin(
         SelectableMixin(
-        JoinableMixin(
-        OrderableMixin(
-        LimitableMixin(
-            CRUDFromObjectBase))))) {
-    constructor(from: CRUDObjectBase, 
-        public joinType: JoinType, 
+            JoinableMixin(
+                OrderableMixin(
+                    LimitableMixin(
+                        CRUDFromObjectBase))))) {
+    constructor(from: CRUDObjectBase,
+        public joinType: JoinType,
         public sourceTable: string,
         public sourceColumn: string,
         public joinTable: string,
-        public joinColumn: string, 
+        public joinColumn: string,
         public selectCols: SQLColumnData[]) {
         super(from);
     }
@@ -529,7 +542,8 @@ export class Join extends
             joinType: this.joinType,
             sourceColumn: this.sourceColumn,
             joinTable: this.joinTable,
-            joinColumn: this.joinColumn});
+            joinColumn: this.joinColumn
+        });
     }
 }
 
@@ -545,12 +559,12 @@ export function WhereableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) 
     };
 }
 
-export class Where extends 
-        LimitableMixin(
+export class Where extends
+    LimitableMixin(
         OrderableMixin(
-        UpdateableMixin(
-        DeleteableMixin(
-        SelectableMixin(CRUDFromObjectBase))))) {
+            UpdateableMixin(
+                DeleteableMixin(
+                    SelectableMixin(CRUDFromObjectBase))))) {
     constructor(from: CRUDObjectBase, public expr: CRUDBooleanExpression) {
         super(from);
     }
@@ -846,9 +860,9 @@ export function any(a: any): CRUDExpression {
         case 'boolean':
             return bool(a);
         case 'object':
-            if(a instanceof Date) {
+            if (a instanceof Date) {
                 return date(a);
-            } else if(a instanceof Uint8Array) {
+            } else if (a instanceof Uint8Array) {
                 return blob(a);
             } else if (a instanceof Int8Array) {
                 return sblob(a);
