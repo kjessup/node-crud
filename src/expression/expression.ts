@@ -1,8 +1,32 @@
 import { CRUDSQLGenError, SQLGenState } from '../index.js';
+declare global {
+    interface Number {
+        primitiveType(): any | undefined;
+        sqlSnippet(state: SQLGenState): string;
+    }
+    interface String {
+        primitiveType(): any | undefined;
+        sqlSnippet(state: SQLGenState): string;
+    }
+}
 
-export type ExpressionProducer = () => CRUDExpression;
+Number.prototype.primitiveType = function () {
+    return this;
+};
 
-export abstract class CRUDExpression {
+Number.prototype.sqlSnippet = function (state: SQLGenState) {
+    return state.delegate.getBinding(new IntegerExpression(this as number));
+}
+
+String.prototype.primitiveType = function () {
+    return this;
+};
+
+String.prototype.sqlSnippet = function (state: SQLGenState) {
+    return state.delegate.getBinding(new StringExpression(this as string));
+}
+
+export abstract class CRUDExpressionClass {
     sqlSnippet(state: SQLGenState): string {
         throw new CRUDSQLGenError('sqlSnippet not implemented.');
     }
@@ -11,11 +35,15 @@ export abstract class CRUDExpression {
     }
 }
 
-export abstract class CRUDBooleanExpression extends CRUDExpression {
-    
+export type CRUDExpression = CRUDExpressionClass | string | number;
+
+export type ExpressionProducer = () => CRUDExpression;
+
+export abstract class CRUDBooleanExpression extends CRUDExpressionClass {
+
 }
 
-export class ColumnExpression extends CRUDExpression {
+export class ColumnExpression extends CRUDExpressionClass {
     constructor(public column: string) {
         super();
     }
@@ -24,7 +52,7 @@ export class ColumnExpression extends CRUDExpression {
     }
 }
 
-export class ColumnExpression2 extends CRUDExpression {
+export class ColumnExpression2 extends CRUDExpressionClass {
     constructor(public table: string, public column: string) {
         super();
     }
@@ -145,9 +173,9 @@ export class InExpression extends CRUDBooleanExpression {
 export class LikeExpression extends CRUDBooleanExpression {
     rhs!: CRUDExpression;
     constructor(
-        public lhs: CRUDExpression, 
-        public wild1: boolean, 
-        public string: string, 
+        public lhs: CRUDExpression,
+        public wild1: boolean,
+        public string: string,
         public wild2: boolean) {
         super();
     }
@@ -158,7 +186,7 @@ export class LikeExpression extends CRUDBooleanExpression {
     }
 }
 
-export class LazyExpression extends CRUDExpression {
+export class LazyExpression extends CRUDExpressionClass {
     constructor(public expressionProducer: ExpressionProducer) {
         super();
     }
@@ -167,7 +195,7 @@ export class LazyExpression extends CRUDExpression {
     }
 }
 
-export class IntegerExpression extends CRUDExpression {
+export class IntegerExpression extends CRUDExpressionClass {
     constructor(public int: number) {
         super();
     }
@@ -179,7 +207,7 @@ export class IntegerExpression extends CRUDExpression {
     }
 }
 
-export class DecimalExpression extends CRUDExpression {
+export class DecimalExpression extends CRUDExpressionClass {
     constructor(public decimal: number) {
         super();
     }
@@ -191,7 +219,7 @@ export class DecimalExpression extends CRUDExpression {
     }
 }
 
-export class StringExpression extends CRUDExpression {
+export class StringExpression extends CRUDExpressionClass {
     constructor(public str: string) {
         super();
     }
@@ -203,7 +231,7 @@ export class StringExpression extends CRUDExpression {
     }
 }
 
-export class BlobExpression extends CRUDExpression {
+export class BlobExpression extends CRUDExpressionClass {
     constructor(public blob: Uint8Array) {
         super();
     }
@@ -215,7 +243,7 @@ export class BlobExpression extends CRUDExpression {
     }
 }
 
-export class SBlobExpression extends CRUDExpression {
+export class SBlobExpression extends CRUDExpressionClass {
     constructor(public sblob: Int8Array) {
         super();
     }
@@ -227,7 +255,7 @@ export class SBlobExpression extends CRUDExpression {
     }
 }
 
-export class BoolExpression extends CRUDExpression {
+export class BoolExpression extends CRUDExpressionClass {
     constructor(public bool: boolean) {
         super();
     }
@@ -239,7 +267,7 @@ export class BoolExpression extends CRUDExpression {
     }
 }
 
-export class DateExpression extends CRUDExpression {
+export class DateExpression extends CRUDExpressionClass {
     constructor(public date: Date) {
         super();
     }
@@ -251,7 +279,7 @@ export class DateExpression extends CRUDExpression {
     }
 }
 
-export class UUIDExpression extends CRUDExpression {
+export class UUIDExpression extends CRUDExpressionClass {
     constructor(public uuid: string) {
         super();
     }
@@ -263,7 +291,7 @@ export class UUIDExpression extends CRUDExpression {
     }
 }
 
-export class NullExpression extends CRUDExpression {
+export class NullExpression extends CRUDExpressionClass {
     constructor() {
         super();
     }

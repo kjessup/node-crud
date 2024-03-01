@@ -154,13 +154,13 @@ export class SQLTopExeDelegate implements SQLExeDelegate {
 
 export class Database {
     constructor(public databaseConnection: IDatabaseConnection) {}
-    table<T extends Object>(table: TableType<T>, columns: SQLColumnData[] = []): TableBase {
+    table<T extends Object>(table: TableType<T>, ...columns: SQLColumnData[]): TableBase {
         if (columns.length == 0) {
             columns.push({name:'*'});
         }
         return new TableBase(this.databaseConnection, table.tableName, columns);
     }
-    async run(statement: string, bindings: ExpressionBinding[] = []): Promise<void> {
+    async run(statement: string, ...bindings: ExpressionBinding[]): Promise<void> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		await delegate.exe<{}>(bindings);
         return;
