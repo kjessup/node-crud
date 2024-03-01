@@ -165,8 +165,7 @@ export class Database {
 		await delegate.exe<{}>(bindings);
         return;
     }
-    async sql<Shape extends Object>(statement: string, bindings: ExpressionBinding[] = []): Promise<Shape[]> {
-        let ret: Shape[] = [];
+    async sql<Shape extends Object>(statement: string, ...bindings: ExpressionBinding[]): Promise<Shape[]> {
         const delegate = this.databaseConnection.sqlExeDelegate(statement);
 		return await delegate.exe<Shape>(bindings);
     }
