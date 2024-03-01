@@ -833,6 +833,9 @@ export function nullExp(): NullExpression {
 }
 
 export function any(a: any): CRUDExpression {
+    if (a === null) {
+        return nullExp();
+    }
     switch (typeof a) {
         case 'number':
             //javascript does not have an inbuilt method to check if the number is integer or float
