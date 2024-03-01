@@ -8,6 +8,18 @@ declare global {
         primitiveType(): any | undefined;
         sqlSnippet(state: SQLGenState): string;
     }
+    interface Boolean {
+        primitiveType(): any | undefined;
+        sqlSnippet(state: SQLGenState): string;
+    }
+}
+
+Boolean.prototype.primitiveType = function () {
+    return this;
+};
+
+Boolean.prototype.sqlSnippet = function (state: SQLGenState) {
+    return state.delegate.getBinding(new BoolExpression(this as boolean));
 }
 
 Number.prototype.primitiveType = function () {
