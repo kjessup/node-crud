@@ -480,7 +480,7 @@ export interface Limitable {
 
 export function LimitableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Limitable {
-        limit(max: number, skip: number): Limit {
+        limit(max: number, skip: number = 0): Limit {
             return new Limit(this, max, skip);
         }
     };
