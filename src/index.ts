@@ -451,7 +451,7 @@ export interface Orderable {
 
 export function OrderableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Orderable {
-        order(by: CRUDExpression, direction: OrderDirection): Ordering {
+        order(by: CRUDExpression, direction: OrderDirection = OrderDirection.ascending): Ordering {
             return new Ordering(this, by, direction);
         }
     };
@@ -516,6 +516,30 @@ export function JoinableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
             joinTable: TableColumnMetadata,
             selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
             return new Join(this, joinType, sourceTable.table, sourceTable.name, joinTable.table, joinTable.name, selectCols);
+        }
+        innerJoin(
+            sourceTable: TableColumnMetadata,
+            joinTable: TableColumnMetadata,
+            selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
+            return this.join(JoinType.inner, sourceTable, joinTable, selectCols);
+        }
+        leftJoin(
+            sourceTable: TableColumnMetadata,
+            joinTable: TableColumnMetadata,
+            selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
+            return this.join(JoinType.left, sourceTable, joinTable, selectCols);
+        }
+        rightJoin(
+            sourceTable: TableColumnMetadata,
+            joinTable: TableColumnMetadata,
+            selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
+            return this.join(JoinType.right, sourceTable, joinTable, selectCols);
+        }
+        fullJoin(
+            sourceTable: TableColumnMetadata,
+            joinTable: TableColumnMetadata,
+            selectCols: SQLColumnData[] = [{ name: '*' }]): Join {
+            return this.join(JoinType.full, sourceTable, joinTable, selectCols);
         }
     };
 }
