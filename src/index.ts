@@ -572,13 +572,17 @@ export class Join extends
 }
 
 export interface Whereable {
-    where(expr: CRUDExpression): Where;
+    where(expr: CRUDExpression, ...andExpr: CRUDExpression[]): Where;
 }
 
 export function WhereableMixin<T extends GConstructor<CRUDObjectBase>>(Base: T) {
     return class extends Base implements Whereable {
-        where(expr: CRUDBooleanExpression): Where {
-            return new Where(this, expr);
+        where(expr: CRUDBooleanExpression, ...andExpr: CRUDExpression[]): Where {
+            if (andExpr.length == 0) {
+                return new Where(this, expr);
+            }
+            const extrapression = [expr, ...andExpr].reduce((lhs, rhs) => and(lhs, rhs));
+            return new Where(this, extrapression);
         }
     };
 }
