@@ -7,9 +7,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "tsc:watch": "npx tsc --watch",
-    "tsc:build": "npx tsc",
-    "prepublish": "npx tsc",
-    "prepare": "npx tsc"
+    "tsc:build": "npx tsc"
   },
   "repository": {
     "type": "git",
@@ -22,7 +20,8 @@
   },
   "homepage": "https://github.com/kjessup/node-crud#readme",
   "devDependencies": {
-    "@types/node": "^20.6.0"
+    "@types/node": "^20.6.0",
+    "typescript": "^5.5.4"
   },
   "dependencies": {
     "reflect-metadata": "^0.2.1"
