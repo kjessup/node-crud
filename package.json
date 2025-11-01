@@ -20,10 +20,9 @@
   },
   "homepage": "https://github.com/kjessup/node-crud#readme",
   "devDependencies": {
-    "@types/node": "^20.6.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
-    "reflect-metadata": "^0.2.1"
+    "reflect-metadata": "^0.2.2"
   }
 }
